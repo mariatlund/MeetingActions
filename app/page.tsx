@@ -1,14 +1,26 @@
 "use client";
 
 import { type ChangeEvent, type FormEvent, useEffect, useState } from "react";
-import { Bell, Calendar, CheckSquare } from "lucide-react";
+import { Bell, Calendar, CheckSquare, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
+	meetingGenerationResultSchema,
 	type MeetingAction,
 	type MeetingGenerationResult,
 } from "@/lib/meeting-generation-schema";
 
 type GenerateResponse = MeetingGenerationResult;
+
+type HistoryEntry = {
+	id: string;
+	createdAt: string;
+	transcriptFileName: string;
+	instructions: string;
+	result: GenerateResponse;
+};
+
+const HISTORY_SESSION_KEY = "meeting-actions:history";
+const MAX_HISTORY_ENTRIES = 20;
 
 function getActionTypeMeta(type: MeetingAction["type"]) {
 	if (type === "meeting_to_schedule") {
@@ -46,6 +58,66 @@ function getActionTypeMeta(type: MeetingAction["type"]) {
 	};
 }
 
+function truncateText(text: string, maxLength: number) {
+	if (text.length <= maxLength) {
+		return text;
+	}
+
+	return `${text.slice(0, maxLength).trimEnd()}...`;
+}
+
+function formatHistoryTimestamp(iso: string) {
+	const date = new Date(iso);
+	if (Number.isNaN(date.getTime())) {
+		return "Unknown time";
+	}
+
+	return new Intl.DateTimeFormat(undefined, {
+		month: "short",
+		day: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+	}).format(date);
+}
+
+function createHistoryId() {
+	if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+		return crypto.randomUUID();
+	}
+
+	return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function parseHistoryEntry(value: unknown): HistoryEntry | null {
+	if (!value || typeof value !== "object") {
+		return null;
+	}
+
+	const candidate = value as Record<string, unknown>;
+	const parsedResult = meetingGenerationResultSchema.safeParse(candidate.result);
+
+	if (!parsedResult.success) {
+		return null;
+	}
+
+	if (
+		typeof candidate.id !== "string" ||
+		typeof candidate.createdAt !== "string" ||
+		typeof candidate.transcriptFileName !== "string" ||
+		typeof candidate.instructions !== "string"
+	) {
+		return null;
+	}
+
+	return {
+		id: candidate.id,
+		createdAt: candidate.createdAt,
+		transcriptFileName: candidate.transcriptFileName,
+		instructions: candidate.instructions,
+		result: parsedResult.data,
+	};
+}
+
 export default function Page() {
 	const [transcriptFile, setTranscriptFile] = useState<File | null>(null);
 	const [instructions, setInstructions] = useState("");
@@ -54,6 +126,53 @@ export default function Page() {
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [result, setResult] = useState<GenerateResponse | null>(null);
 	const [elapsedSeconds, setElapsedSeconds] = useState(0);
+	const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
+	const [expandedHistoryIds, setExpandedHistoryIds] = useState<
+		Record<string, boolean>
+	>({});
+
+	useEffect(() => {
+		try {
+			const raw = window.sessionStorage.getItem(HISTORY_SESSION_KEY);
+			if (!raw) {
+				return;
+			}
+
+			const parsed = JSON.parse(raw);
+			if (!Array.isArray(parsed)) {
+				window.sessionStorage.removeItem(HISTORY_SESSION_KEY);
+				return;
+			}
+
+			const validEntries = parsed
+				.map((item) => parseHistoryEntry(item))
+				.filter((item): item is HistoryEntry => item !== null)
+				.slice(0, MAX_HISTORY_ENTRIES);
+
+			setHistoryEntries(validEntries);
+			setExpandedHistoryIds(
+				Object.fromEntries(validEntries.map((entry, index) => [entry.id, index === 0])),
+			);
+
+			if (validEntries.length > 0) {
+				setResult(validEntries[0].result);
+			}
+		} catch {
+			window.sessionStorage.removeItem(HISTORY_SESSION_KEY);
+		}
+	}, []);
+
+	useEffect(() => {
+		if (historyEntries.length === 0) {
+			window.sessionStorage.removeItem(HISTORY_SESSION_KEY);
+			return;
+		}
+
+		window.sessionStorage.setItem(
+			HISTORY_SESSION_KEY,
+			JSON.stringify(historyEntries),
+		);
+	}, [historyEntries]);
 
 	useEffect(() => {
 		if (!isSubmitting) {
@@ -71,6 +190,13 @@ export default function Page() {
 			window.clearInterval(intervalId);
 		};
 	}, [isSubmitting]);
+
+	function toggleHistoryItem(entryId: string) {
+		setExpandedHistoryIds((prev) => ({
+			...prev,
+			[entryId]: !prev[entryId],
+		}));
+	}
 
 	function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
 		const pickedFile = event.target.files?.[0] ?? null;
@@ -126,7 +252,23 @@ export default function Page() {
 				return;
 			}
 
-			setResult(payload as GenerateResponse);
+			const generationResult = payload as GenerateResponse;
+			const newHistoryEntry: HistoryEntry = {
+				id: createHistoryId(),
+				createdAt: new Date().toISOString(),
+				transcriptFileName: transcriptFile.name,
+				instructions: instructions.trim(),
+				result: generationResult,
+			};
+
+			setResult(generationResult);
+			setHistoryEntries((prev) =>
+				[newHistoryEntry, ...prev].slice(0, MAX_HISTORY_ENTRIES),
+			);
+			setExpandedHistoryIds((prev) => ({
+				...prev,
+				[newHistoryEntry.id]: true,
+			}));
 		} catch {
 			setApiError("Something went wrong while generating notes.");
 		} finally {
@@ -135,8 +277,8 @@ export default function Page() {
 	}
 
 	return (
-		<main className="mx-auto flex min-h-svh w-full max-w-3xl items-center px-6 py-12">
-			<section className="w-full rounded-2xl border bg-card p-6 shadow-sm sm:p-8">
+		<main className="mx-auto flex min-h-svh w-full max-w-7xl flex-col gap-6 px-6 py-8 lg:flex-row lg:items-start lg:py-12">
+			<section className="w-full rounded-2xl border bg-card p-6 shadow-sm sm:p-8 lg:flex-1">
 				<header className="space-y-2">
 					<h1 className="text-2xl font-semibold tracking-tight">
 						Meeting Notes Generator
@@ -301,6 +443,96 @@ export default function Page() {
 					</section>
 				) : null}
 			</section>
+
+			<aside className="w-full lg:max-w-sm">
+				<section className="rounded-2xl border bg-card p-6 shadow-sm lg:sticky lg:top-6">
+					<header className="space-y-1">
+						<h2 className="text-lg font-semibold tracking-tight">History</h2>
+						<p className="text-xs text-muted-foreground">
+							Generated outputs from the current browser session.
+						</p>
+					</header>
+
+					{historyEntries.length === 0 ? (
+						<p className="mt-4 text-sm text-muted-foreground">
+							No history yet. Generate your first meeting output to see it here.
+						</p>
+					) : (
+						<ul className="mt-4 space-y-2">
+							{historyEntries.map((entry) => {
+								const isExpanded = Boolean(expandedHistoryIds[entry.id]);
+
+								return (
+									<li key={entry.id} className="overflow-hidden rounded-md border">
+										<button
+											type="button"
+											onClick={() => toggleHistoryItem(entry.id)}
+											className="flex w-full items-start justify-between gap-3 bg-background px-3 py-2 text-left transition-colors hover:bg-muted/60"
+										>
+											<div className="min-w-0">
+												<p className="truncate text-sm font-medium text-foreground">
+													{entry.transcriptFileName}
+												</p>
+												<p className="text-xs text-muted-foreground">
+													{formatHistoryTimestamp(entry.createdAt)}
+												</p>
+												<p className="text-[11px] text-muted-foreground">
+													{entry.result.actions.length} actions • {entry.result.notes.length}{" "}
+													notes
+												</p>
+											</div>
+											<ChevronDown
+												className={`mt-1 size-4 shrink-0 text-muted-foreground transition-transform ${
+													isExpanded ? "rotate-180" : "rotate-0"
+												}`}
+											/>
+										</button>
+
+										{isExpanded ? (
+											<div className="space-y-2 border-t bg-muted/30 px-3 py-2 text-xs">
+												<div>
+													<p className="font-medium uppercase tracking-wide text-muted-foreground">
+														Summary
+													</p>
+													<p className="mt-1 text-foreground">
+														{truncateText(entry.result.summary, 180)}
+													</p>
+												</div>
+
+												{entry.instructions ? (
+													<div>
+														<p className="font-medium uppercase tracking-wide text-muted-foreground">
+															Instructions
+														</p>
+														<p className="mt-1 text-foreground">
+															{truncateText(entry.instructions, 120)}
+														</p>
+													</div>
+												) : null}
+
+												{entry.result.actions.length > 0 ? (
+													<div>
+														<p className="font-medium uppercase tracking-wide text-muted-foreground">
+															Action preview
+														</p>
+														<ul className="mt-1 list-disc space-y-1 pl-4 text-foreground">
+															{entry.result.actions.slice(0, 2).map((action, index) => (
+																<li key={`${action.title}-${index}`}>
+																	{truncateText(action.title, 70)}
+																</li>
+															))}
+														</ul>
+													</div>
+												) : null}
+											</div>
+										) : null}
+									</li>
+								);
+							})}
+						</ul>
+					)}
+				</section>
+			</aside>
 		</main>
 	);
 }
