@@ -1,206 +1,306 @@
-"use client"
+"use client";
 
-import { type ChangeEvent, type FormEvent, useEffect, useState } from "react"
-import { Button } from "@/components/ui/button"
+import { type ChangeEvent, type FormEvent, useEffect, useState } from "react";
+import { Bell, Calendar, CheckSquare } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+	type MeetingAction,
+	type MeetingGenerationResult,
+} from "@/lib/meeting-generation-schema";
 
-type GenerateResponse = {
-  summary: string
-  actions: string
-  raw?: string
+type GenerateResponse = MeetingGenerationResult;
+
+function getActionTypeMeta(type: MeetingAction["type"]) {
+	if (type === "meeting_to_schedule") {
+		return {
+			cardClass:
+				"border-sky-200 bg-sky-50/70 dark:border-sky-900/60 dark:bg-sky-950/30",
+			badgeClass:
+				"bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200",
+			iconLabel: "Meeting action",
+			label: "Meeting",
+			Icon: Calendar,
+		};
+	}
+
+	if (type === "inform_update") {
+		return {
+			cardClass:
+				"border-amber-200 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/30",
+			badgeClass:
+				"bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200",
+			iconLabel: "Inform/update action",
+			label: "Communicate",
+			Icon: Bell,
+		};
+	}
+
+	return {
+		cardClass:
+			"border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/60 dark:bg-emerald-950/30",
+		badgeClass:
+			"bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200",
+		iconLabel: "Task action",
+		label: "Task",
+		Icon: CheckSquare,
+	};
 }
 
 export default function Page() {
-  const [transcriptFile, setTranscriptFile] = useState<File | null>(null)
-  const [instructions, setInstructions] = useState("")
-  const [fileError, setFileError] = useState("")
-  const [apiError, setApiError] = useState("")
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [result, setResult] = useState<GenerateResponse | null>(null)
-  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+	const [transcriptFile, setTranscriptFile] = useState<File | null>(null);
+	const [instructions, setInstructions] = useState("");
+	const [fileError, setFileError] = useState("");
+	const [apiError, setApiError] = useState("");
+	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [result, setResult] = useState<GenerateResponse | null>(null);
+	const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
-  useEffect(() => {
-    if (!isSubmitting) {
-      setElapsedSeconds(0)
-      return
-    }
+	useEffect(() => {
+		if (!isSubmitting) {
+			setElapsedSeconds(0);
+			return;
+		}
 
-    const startedAt = Date.now()
-    const intervalId = window.setInterval(() => {
-      const seconds = Math.floor((Date.now() - startedAt) / 1000)
-      setElapsedSeconds(seconds)
-    }, 200)
+		const startedAt = Date.now();
+		const intervalId = window.setInterval(() => {
+			const seconds = Math.floor((Date.now() - startedAt) / 1000);
+			setElapsedSeconds(seconds);
+		}, 200);
 
-    return () => {
-      window.clearInterval(intervalId)
-    }
-  }, [isSubmitting])
+		return () => {
+			window.clearInterval(intervalId);
+		};
+	}, [isSubmitting]);
 
-  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const pickedFile = event.target.files?.[0] ?? null
-    setFileError("")
+	function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+		const pickedFile = event.target.files?.[0] ?? null;
+		setFileError("");
 
-    if (!pickedFile) {
-      setTranscriptFile(null)
-      return
-    }
+		if (!pickedFile) {
+			setTranscriptFile(null);
+			return;
+		}
 
-    const hasTxtExtension = pickedFile.name.toLowerCase().endsWith(".txt")
-    if (!hasTxtExtension) {
-      setTranscriptFile(null)
-      setFileError("Please upload a .txt file.")
-      return
-    }
+		const hasTxtExtension = pickedFile.name.toLowerCase().endsWith(".txt");
+		if (!hasTxtExtension) {
+			setTranscriptFile(null);
+			setFileError("Please upload a .txt file.");
+			return;
+		}
 
-    setTranscriptFile(pickedFile)
-  }
+		setTranscriptFile(pickedFile);
+	}
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+	async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+		event.preventDefault();
 
-    if (!transcriptFile) {
-      setApiError("Please select a transcript file first.")
-      return
-    }
+		if (!transcriptFile) {
+			setApiError("Please select a transcript file first.");
+			return;
+		}
 
-    setIsSubmitting(true)
-    setApiError("")
-    setResult(null)
+		setIsSubmitting(true);
+		setApiError("");
+		setResult(null);
 
-    try {
-      const formData = new FormData()
-      formData.append("transcript", transcriptFile)
-      formData.append("instructions", instructions)
+		try {
+			const formData = new FormData();
+			formData.append("transcript", transcriptFile);
+			formData.append("instructions", instructions);
 
-      const response = await fetch("/api/meetings/generate", {
-        method: "POST",
-        body: formData,
-      })
+			const response = await fetch("/api/meetings/generate", {
+				method: "POST",
+				body: formData,
+			});
 
-      const payload = (await response.json()) as
-        | GenerateResponse
-        | { error?: string }
+			const payload = (await response.json()) as
+				| GenerateResponse
+				| { error?: string };
 
-      if (!response.ok) {
-        const message =
-          "error" in payload && payload.error
-            ? payload.error
-            : "Generation failed."
-        setApiError(message)
-        return
-      }
+			if (!response.ok) {
+				const message =
+					"error" in payload && payload.error
+						? payload.error
+						: "Generation failed.";
+				setApiError(message);
+				return;
+			}
 
-      setResult({
-        summary: "summary" in payload ? payload.summary : "",
-        actions: "actions" in payload ? payload.actions : "",
-        raw: "raw" in payload ? payload.raw : undefined,
-      })
-    } catch {
-      setApiError("Something went wrong while generating notes.")
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
+			setResult(payload as GenerateResponse);
+		} catch {
+			setApiError("Something went wrong while generating notes.");
+		} finally {
+			setIsSubmitting(false);
+		}
+	}
 
-  return (
-    <main className="mx-auto flex min-h-svh w-full max-w-3xl items-center px-6 py-12">
-      <section className="w-full rounded-2xl border bg-card p-6 shadow-sm sm:p-8">
-        <header className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Meeting Notes Generator
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Upload a transcript and add extra AI instructions for how the
-            summary and tasks should be generated.
-          </p>
-        </header>
+	return (
+		<main className="mx-auto flex min-h-svh w-full max-w-3xl items-center px-6 py-12">
+			<section className="w-full rounded-2xl border bg-card p-6 shadow-sm sm:p-8">
+				<header className="space-y-2">
+					<h1 className="text-2xl font-semibold tracking-tight">
+						Meeting Notes Generator
+					</h1>
+					<p className="text-sm text-muted-foreground">
+						Upload a transcript and add extra AI instructions for how the
+						summary and tasks should be generated.
+					</p>
+				</header>
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-2">
-            <label
-              htmlFor="transcript"
-              className="text-sm font-medium text-foreground"
-            >
-              Transcript File (.txt)
-            </label>
-            <input
-              id="transcript"
-              name="transcript"
-              type="file"
-              accept=".txt,text/plain"
-              onChange={handleFileChange}
-              className="block w-full rounded-md border bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:opacity-90"
-            />
-            {transcriptFile ? (
-              <p className="text-xs text-muted-foreground">
-                Selected file: <span className="font-medium">{transcriptFile.name}</span>
-              </p>
-            ) : null}
-            {fileError ? (
-              <p className="text-xs text-destructive">{fileError}</p>
-            ) : null}
-          </div>
+				<form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+					<div className="space-y-2">
+						<label
+							htmlFor="transcript"
+							className="text-sm font-medium text-foreground"
+						>
+							Transcript File (.txt)
+						</label>
+						<input
+							id="transcript"
+							name="transcript"
+							type="file"
+							accept=".txt,text/plain"
+							onChange={handleFileChange}
+							className="block w-full rounded-md border bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:opacity-90"
+						/>
+						{transcriptFile ? (
+							<p className="text-xs text-muted-foreground">
+								Selected file:{" "}
+								<span className="font-medium">{transcriptFile.name}</span>
+							</p>
+						) : null}
+						{fileError ? (
+							<p className="text-xs text-destructive">{fileError}</p>
+						) : null}
+					</div>
 
-          <div className="space-y-2">
-            <label
-              htmlFor="instructions"
-              className="text-sm font-medium text-foreground"
-            >
-              Additional AI Instructions
-            </label>
-            <textarea
-              id="instructions"
-              name="instructions"
-              rows={5}
-              value={instructions}
-              onChange={(event) => setInstructions(event.target.value)}
-              placeholder="Example: Keep the summary under 6 bullet points and highlight decisions."
-              className="w-full resize-y rounded-md border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-            />
-            <p className="text-xs text-muted-foreground">
-              Optional: explain tone, length, and what to prioritize.
-            </p>
-          </div>
+					<div className="space-y-2">
+						<label
+							htmlFor="instructions"
+							className="text-sm font-medium text-foreground"
+						>
+							Additional AI Instructions
+						</label>
+						<textarea
+							id="instructions"
+							name="instructions"
+							rows={5}
+							value={instructions}
+							onChange={(event) => setInstructions(event.target.value)}
+							placeholder="Example: Keep the summary under 6 bullet points and highlight decisions."
+							className="w-full resize-y rounded-md border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+						/>
+						<p className="text-xs text-muted-foreground">
+							Optional: explain tone, length, and what to prioritize.
+						</p>
+					</div>
 
-          <Button type="submit" disabled={!transcriptFile || isSubmitting}>
-            {isSubmitting ? "Generating..." : "Generate Notes and Actions"}
-          </Button>
-        </form>
+					<Button type="submit" disabled={!transcriptFile || isSubmitting}>
+						{isSubmitting ? "Generating..." : "Generate Notes and Actions"}
+					</Button>
+				</form>
 
-        {apiError ? (
-          <div className="mt-6 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-            {apiError}
-          </div>
-        ) : null}
+				{apiError ? (
+					<div className="mt-6 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+						{apiError}
+					</div>
+				) : null}
 
-        {isSubmitting ? (
-          <div className="mt-6 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
-            <p className="font-medium text-foreground">
-              Generating notes and actions...
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Elapsed time: {elapsedSeconds}s
-            </p>
-          </div>
-        ) : null}
+				{isSubmitting ? (
+					<div className="mt-6 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+						<p className="font-medium text-foreground">
+							Generating notes and actions...
+						</p>
+						<p className="text-xs text-muted-foreground">
+							Elapsed time: {elapsedSeconds}s
+						</p>
+					</div>
+				) : null}
 
-        {result ? (
-          <section className="mt-6 space-y-3 rounded-md border bg-muted/40 p-4">
-            <h2 className="text-sm font-semibold">Temporary Response Output</h2>
-            <div className="space-y-1">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Summary
-              </p>
-              <pre className="whitespace-pre-wrap text-sm">{result.summary}</pre>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Actions
-              </p>
-              <pre className="whitespace-pre-wrap text-sm">{result.actions}</pre>
-            </div>
-          </section>
-        ) : null}
-      </section>
-    </main>
-  )
+				{result ? (
+					<section className="mt-6 space-y-3 rounded-md border bg-muted/40 p-4">
+						<h2 className="text-2xl font-semibold tracking-tight">Response</h2>
+						<div className="space-y-1">
+							<p className="text-sm font-semibold uppercase tracking-wide text-foreground">
+								Summary
+							</p>
+							<pre className="whitespace-pre-wrap text-sm">
+								{result.summary}
+							</pre>
+						</div>
+						<div className="space-y-1">
+							<p className="text-sm font-semibold uppercase tracking-wide text-foreground">
+								Actions
+							</p>
+							{result.actions.length > 0 ? (
+								<ul className="space-y-2 text-sm">
+									{result.actions.map((action: MeetingAction, index) => {
+										const meta = getActionTypeMeta(action.type);
+										const Icon = meta.Icon;
+
+										return (
+											<li
+												key={`${action.title}-${index}`}
+												className={`rounded-md border p-3 ${meta.cardClass}`}
+											>
+												<div className="mb-1 flex items-center gap-2">
+													<span
+														className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${meta.badgeClass}`}
+														aria-label={meta.iconLabel}
+														title={meta.iconLabel}
+													>
+														<Icon className="size-3" />
+														{meta.label}
+													</span>
+												</div>
+												<p className="font-medium">{action.title}</p>
+												<p className="mt-1">{action.details}</p>
+												{action.people.length > 0 ? (
+													<div className="mt-2 space-y-1">
+														<p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+															People
+														</p>
+														<div className="flex flex-wrap gap-1.5">
+															{action.people.map((person, personIndex) => (
+																<span
+																	key={`${person}-${personIndex}`}
+																	className="inline-flex items-center rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-foreground"
+																>
+																	{person}
+																</span>
+															))}
+														</div>
+													</div>
+												) : null}
+											</li>
+										);
+									})}
+								</ul>
+							) : (
+								<p className="text-sm text-muted-foreground">
+									No actions extracted.
+								</p>
+							)}
+						</div>
+						<div className="space-y-1">
+							<p className="text-sm font-semibold uppercase tracking-wide text-foreground">
+								Notes
+							</p>
+							{result.notes.length > 0 ? (
+								<ul className="list-disc space-y-1 pl-5 text-sm">
+									{result.notes.map((note, index) => (
+										<li key={`${note}-${index}`}>{note}</li>
+									))}
+								</ul>
+							) : (
+								<p className="text-sm text-muted-foreground">
+									No additional notes.
+								</p>
+							)}
+						</div>
+					</section>
+				) : null}
+			</section>
+		</main>
+	);
 }
